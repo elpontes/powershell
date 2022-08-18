@@ -1,0 +1,83 @@
+#This script copies alerts from an AzureVM to other AzureVMs.
+
+    Add-Type -Path "C:\Program Files\Common Files\microsoft shared\Web Server Extensions\16\ISAPI\Microsoft.SharePoint.Client.dll"
+	Add-Type -Path "C:\Program Files\Common Files\microsoft shared\Web Server Extensions\16\ISAPI\Microsoft.SharePoint.Client.Runtime.dll"
+
+Function AzureRMLogin
+{
+    $User = "insert user"
+    $Hash = "insert pwdhash"
+    $Pass = $Hash | ConvertTo-SecureString
+    $Creds = New-Object System.Management.Automation.PSCredential($User, $Pass)    
+    Login-AzAccount -Credential $Creds
+}
+
+Function LoginSPO()
+{
+    $User = "insert user"
+    $Hash = "insert pwdhash"
+    $Pass = $Hash | ConvertTo-SecureString
+    $Password = $Hash | convertto-securestring
+	$Creds = New-Object Microsoft.SharePoint.Client.SharePointOnlineCredentials($User,$Pass)
+	return $Creds
+}
+
+
+Function SetAlerts ($VMs, $Subscription)
+{
+
+    AzureRMLogin
+    Select-AzureRmSubscription -SubscriptionName "SubscriptionName"
+
+    #Getting alert from source
+    $resourceGroupSource = "RGName"
+    $VMSourceName = "VMName"
+    $VMSource = get-azurermvm -ResourceGroupName $resourceGroupSource -Name $VMSourceName
+    $rules = Get-AzureRmAlertRule -ResourceGroupName $resourceGroupSource -DetailedOutput | where {$_.Condition.DataSource.ResourceUri -eq $VMSource.Id}   
+    #############################################################
+
+    Select-AzureRmSubscription -SubscriptionName $Subscription
+
+    foreach ($VM in $VMs)
+    {        
+        $resourceGroupName = $vm.ResourceGroupName
+
+        foreach ($rule in $rules)
+        {
+            $Mails = $MailObj = $ActionObj = $null
+
+            if ($rule.Description -eq $null)
+            {
+                $rule.Description = ' '
+            }
+            if ($rule.Actions.Count -ne 0)
+            {
+                if($rule.Actions.customemails -ne $null -and $rule.Actions.serviceuri -ne $null)
+                {
+                    $Mails = $rule.Actions.customemails
+                    $MailObj = new-azurermAlertRuleEmail -CustomEmail $Mails         
+                    $ActionObj = New-AzureRmAlertRuleWebhook -ServiceUri $rule.Actions.serviceuri -Property $rule.Actions.properties              
+                    Add-AzureRmMetricAlertRule -ResourceGroupName $resourceGroupName -TargetResourceId $Vm.id -Location $rule.Location -Name $rule.AlertRuleResourceName -Description $rule.Description -MetricName $rule.Condition.DataSource.MetricName -Operator $rule.Condition.OperatorProperty -Threshold $rule.Condition.Threshold -WindowSize $rule.Condition.WindowSize -TimeAggregationOperator $rule.Condition.TimeAggregation -Action $ActionObj, $MailObj 
+                }
+                else
+                {
+                    if($rule.Actions.customemails -ne $null -and $rule.Actions.serviceuri -eq $null)
+                    {
+                        $Mails = $rule.Actions.customemails
+                        $MailObj = new-azurermAlertRuleEmail -CustomEmail $Mails         
+                        Add-AzureRmMetricAlertRule -ResourceGroupName $resourceGroupName -TargetResourceId $Vm.id -Location $rule.Location -Name $rule.AlertRuleResourceName -Description $rule.Description -MetricName $rule.Condition.DataSource.MetricName -Operator $rule.Condition.OperatorProperty -Threshold $rule.Condition.Threshold -WindowSize $rule.Condition.WindowSize -TimeAggregationOperator $rule.Condition.TimeAggregation -Action $MailObj
+                    }
+                    if($rule.Actions.customemails -eq $null -and $rule.Actions.serviceuri -ne $null)
+                    {
+                        $ActionObj = New-AzureRmAlertRuleWebhook -ServiceUri $rule.Actions.serviceuri -Property $rule.Actions.properties              
+                        Add-AzureRmMetricAlertRule -ResourceGroupName $resourceGroupName -TargetResourceId $Vm.id -Location $rule.Location -Name $rule.AlertRuleResourceName -Description $rule.Description -MetricName $rule.Condition.DataSource.MetricName -Operator $rule.Condition.OperatorProperty -Threshold $rule.Condition.Threshold -WindowSize $rule.Condition.WindowSize -TimeAggregationOperator $rule.Condition.TimeAggregation -Action $ActionObj
+                    }
+                }
+            }
+            else
+            {
+                Add-AzureRmMetricAlertRule -ResourceGroupName $resourceGroupName -TargetResourceId $Vm.id -Location $rule.Location -Name $rule.AlertRuleResourceName -Description $rule.Description -MetricName $rule.Condition.DataSource.MetricName -Operator $rule.Condition.OperatorProperty -Threshold $rule.Condition.Threshold -WindowSize $rule.Condition.WindowSize -TimeAggregationOperator $rule.Condition.TimeAggregation
+            }
+        }
+    }
+}
